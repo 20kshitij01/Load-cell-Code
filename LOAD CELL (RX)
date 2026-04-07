@@ -1,0 +1,63 @@
+#include <SPI.h>
+#include <nRF24L01.h>
+#include <RF24.h>
+
+RF24 radio(9, 10);
+const byte address[6] = "00001";
+
+struct DataPacket {
+  unsigned long time_ms;
+  float thrust_g;
+  float thrust_n;
+  float burn_time;
+  float max_thrust;
+  bool isFinal;
+};
+
+DataPacket data;
+
+void setup() {
+  Serial.begin(115200);
+
+  radio.begin();
+  radio.openReadingPipe(0, address);
+  radio.setPALevel(RF24_PA_LOW);
+  radio.setDataRate(RF24_2MBPS);
+  radio.setAutoAck(false);
+  radio.startListening();
+
+  Serial.println("=== RX READY ===");
+}
+
+void loop() {
+  while (radio.available()) {
+    radio.read(&data, sizeof(data));
+
+    // 🔴 FINAL RESULT
+    if (data.isFinal) {
+      Serial.println("\n=== FINAL RESULT RECEIVED ===");
+
+      Serial.print("Max Thrust: ");
+      Serial.print(data.max_thrust, 1);
+      Serial.println(" g");
+
+      Serial.print("Max Thrust: ");
+      Serial.print(data.max_thrust * 0.00980665, 4);
+      Serial.println(" N");
+
+      Serial.print("Burn Time: ");
+      Serial.print(data.burn_time, 3);
+      Serial.println(" s");
+
+      Serial.println("=============================");
+    }
+    else {
+      // 📊 LIVE DATA
+      Serial.print(data.time_ms);
+      Serial.print(",");
+      Serial.print(data.thrust_g, 1);
+      Serial.print(",");
+      Serial.println(data.thrust_n, 4);
+    }
+  }
+}
