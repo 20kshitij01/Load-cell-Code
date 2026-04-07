@@ -1,0 +1,34 @@
+#include "HX711.h"
+
+#define DT 3
+#define SCK 2
+
+HX711 scale;
+
+// 🔥 UPDATED FACTOR (increase because your reading was ~2x)
+float calibration_factor = 17000;  
+
+void setup() {
+  Serial.begin(9600);
+  scale.begin(DT, SCK);
+  scale.set_scale(calibration_factor);
+
+  delay(2000);     // reduced (faster start)
+  scale.tare();    // zero properly
+}
+
+void loop() {  
+  // ⚡ FASTER RESPONSE (reduced averaging)
+  float weight = scale.get_units(5);
+
+  // ✅ REMOVE NEGATIVE + DRIFT
+  if (weight < 0.03) {   // tighter threshold (30g)
+    weight = 0.00;
+  }
+
+  Serial.print("Weight: ");
+  Serial.print(weight, 3);
+  Serial.println(" kg");
+
+  delay(50);   // faster refresh
+}
