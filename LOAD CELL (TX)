@@ -1,0 +1,132 @@
+#include <SPI.h>
+#include <nRF24L01.h>
+#include <RF24.h>
+#include "HX711.h"
+
+// HX711
+#define DOUT_PIN 3
+#define SCK_PIN 2
+HX711 scale;
+
+// NRF
+RF24 radio(9, 10);
+const byte address[6] = "00001";
+
+// Calibration
+float CAL_FACTOR = -39.0;
+
+// Rocket variables
+float MAX_THRUST = 0;
+unsigned long BURN_START = 0;
+unsigned long BURN_END = 0;
+
+// Data packet
+struct DataPacket {
+  unsigned long time_ms;
+  float thrust_g;
+  float thrust_n;
+  float burn_time;
+  float max_thrust;
+  bool isFinal;
+};
+
+DataPacket data;
+
+void setup() {
+  Serial.begin(115200);
+
+  scale.begin(DOUT_PIN, SCK_PIN);
+  scale.set_scale(CAL_FACTOR);
+  scale.tare();
+
+  radio.begin();
+  radio.openWritingPipe(address);
+  radio.setPALevel(RF24_PA_LOW);
+  radio.setDataRate(RF24_2MBPS);
+  radio.setAutoAck(false);
+  radio.stopListening();
+
+  Serial.println("=== TX READY ===");
+}
+
+void loop() {
+  static bool recording = false;
+  static unsigned long startTime = 0;
+  static unsigned long lowStart = 0;
+
+  if (scale.is_ready()) {
+
+    float thrust_g = scale.get_units(1);
+    float thrust_abs = abs(thrust_g);
+
+    if (!recording && thrust_abs > 20) {
+      recording = true;
+      startTime = millis();
+      BURN_START = millis();
+      MAX_THRUST = thrust_abs;
+      Serial.println("IGNITION!");
+    }
+
+    if (recording) {
+      unsigned long elapsed = millis() - startTime;
+
+      if (thrust_abs > MAX_THRUST) {
+        MAX_THRUST = thrust_abs;
+      }
+
+      float thrust_n = thrust_abs * 0.00980665;
+
+      // LIVE DATA
+      data.time_ms = elapsed;
+      data.thrust_g = thrust_abs;
+      data.thrust_n = thrust_n;
+      data.isFinal = false;
+
+      radio.writeFast(&data, sizeof(data));
+
+      Serial.print(elapsed);
+      Serial.print(",");
+      Serial.print(thrust_abs, 1);
+      Serial.print(",");
+      Serial.println(thrust_n, 4);
+
+      // Burn end detection
+      if (thrust_abs < 10) {
+        if (lowStart == 0) lowStart = millis();
+        if (millis() - lowStart > 200) {
+          BURN_END = lowStart;
+          stopTest();
+        }
+      } else {
+        lowStart = 0;
+      }
+
+      if (elapsed > 5000) {
+        BURN_END = millis();
+        stopTest();
+      }
+    }
+  }
+}
+
+void stopTest() {
+  float burnTime = (BURN_END - BURN_START) / 1000.0;
+
+  // 🔥 SEND FINAL DATA
+  data.time_ms = 0;
+  data.thrust_g = 0;
+  data.thrust_n = 0;
+  data.burn_time = burnTime;
+  data.max_thrust = MAX_THRUST;
+  data.isFinal = true;
+
+  radio.write(&data, sizeof(data));
+
+  Serial.println("\n=== TEST COMPLETE ===");
+  Serial.print("Max Thrust: ");
+  Serial.println(MAX_THRUST);
+  Serial.print("Burn Time: ");
+  Serial.println(burnTime);
+
+  while (1);
+}
